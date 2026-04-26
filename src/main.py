@@ -9,9 +9,9 @@ from zoneinfo import ZoneInfo
 
 from .config import Config
 from .link_fetcher import fetch_links
+from .sender import send_digest
 from .summarizer import make_digest
-from .tg_reader import collect_messages, send_digest
-
+from .tme_reader import collect_messages
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,13 +24,10 @@ log = logging.getLogger("digest")
 async def run() -> None:
     cfg = Config.from_env()
     today = datetime.now(ZoneInfo("Europe/Moscow")).strftime("%d.%m.%Y")
-    log.info("Запуск дайджеста за %s, папки: %s", today, cfg.folders)
+    log.info("Запуск дайджеста за %s, каналов: %d", today, len(cfg.channels))
 
     messages = await collect_messages(
-        api_id=cfg.tg_api_id,
-        api_hash=cfg.tg_api_hash,
-        session=cfg.tg_session,
-        folders_wanted=cfg.folders,
+        channels=cfg.channels,
         lookback_hours=cfg.lookback_hours,
     )
 
@@ -48,10 +45,8 @@ async def run() -> None:
     )
 
     await send_digest(
-        api_id=cfg.tg_api_id,
-        api_hash=cfg.tg_api_hash,
-        session=cfg.tg_session,
-        target_chat_id=cfg.target_chat_id,
+        bot_token=cfg.bot_token,
+        chat_id=cfg.target_chat_id,
         text=digest,
     )
     log.info("Готово.")

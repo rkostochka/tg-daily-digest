@@ -1,13 +1,15 @@
 # tg-daily-digest
 
-Ежедневный AI-дайджест из ваших Telegram-папок. Запускается на GitHub Actions в 8:00 МСК, читает указанные папки за последние 24 часа, подтягивает текст по ссылкам, группирует по темам, дедуплицирует и присылает короткую выжимку с разделом «Влияние» в указанный чат.
+Ежедневный AI-дайджест из Telegram-каналов. Запускается на GitHub Actions в 8:00 МСК, читает публичные каналы за 24 часа, подтягивает текст по ссылкам, группирует по темам, дедуплицирует и присылает выжимку с блоком «Влияние» в указанную группу.
+
+**Не требует API-ключей Telegram** — читает публичные каналы напрямую через `t.me/s/username`.
 
 ## Как это работает
 
-1. Telethon (MTProto под вашим аккаунтом) читает папки `Fin, Interests, Data, News`.
-2. `httpx + trafilatura` параллельно качают и извлекают основной текст из ссылок в постах.
-3. Один вызов LLM на OpenRouter (по умолчанию `google/gemini-2.0-flash-exp:free`, 1M контекст) — фильтрует мелочёвку, дедуплицирует, группирует по темам, добавляет «Влияние».
-4. Дайджест отправляется в группу `TARGET_CHAT_ID` от вашего же аккаунта.
+1. `httpx + lxml` параллельно парсят `t.me/s/{channel}` за последние 24 часа.
+2. `httpx + trafilatura` извлекают основной текст из внешних ссылок в постах.
+3. Один вызов LLM на OpenRouter (`google/gemini-2.0-flash-exp:free`, 1M контекст): фильтрует мелочёвку, дедуплицирует, группирует по 7 темам, добавляет «Влияние».
+4. Дайджест отправляется в группу через Bot API.
 
 ## Тематические блоки
 
@@ -19,103 +21,92 @@
 - 🔬 Наука и продуктивность
 - 📌 Прочее значимое
 
-Блок без значимых новостей пропускается. Изменить набор блоков — в [src/summarizer.py](src/summarizer.py#L18) (`SYSTEM_PROMPT`).
+Блок без значимых новостей пропускается. Логику группировки меняйте в [src/summarizer.py](src/summarizer.py) (`SYSTEM_PROMPT`).
 
-## Первичная настройка (один раз, локально)
+## Первичная настройка
 
-### 1. Получите Telegram API credentials
+### 1. Список каналов
 
-Перейдите на https://my.telegram.org → API development tools → создайте приложение. Запишите `api_id` и `api_hash`.
+Откройте каждую из папок `Fin, Interests, Data, News` в Telegram. Для каждого канала:
+- Нажмите на название → Profile → скопируйте `@username` (или ссылку `t.me/username`)
 
-### 2. Получите OpenRouter API ключ
+Запишите все username. Работают только **публичные** каналы (у которых есть @username).
 
-Зарегистрируйтесь на https://openrouter.ai, создайте ключ на https://openrouter.ai/keys. Бесплатные модели работают без пополнения, но лимит — ~50 запросов в день. Этого с запасом хватит на 1 запуск/сутки.
+### 2. Bot Token
 
-### 3. Локальная авторизация Telethon
+Если у вас ещё нет токена: откройте `@BotFather` в Telegram → `/newbot` → придумайте имя → скопируйте токен `1234567890:ABC...`. Добавьте бота в вашу группу-приёмник и дайте права на отправку сообщений.
 
-```bash
-cd tg-daily-digest
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+Если бот уже создан — найдите токен через `@BotFather` → `/mybots` → выберите бота → API Token.
 
-cp .env.example .env
-# Откройте .env и впишите TG_API_ID и TG_API_HASH
-python auth.py
-```
+### 3. OpenRouter API ключ
 
-Скрипт спросит номер телефона и код из SMS, потом — пароль 2FA, если включён. В конце выведет длинную строку — это `TG_SESSION`. Скопируйте.
+https://openrouter.ai → Sign in (Google/GitHub) → https://openrouter.ai/keys → Create Key. Бесплатно, лимит ~50 запросов/день (нам нужен 1/день).
 
-### 4. Создайте приватный репозиторий
+### 4. Создать репозиторий на GitHub
 
-На github.com → New repository → имя `tg-daily-digest`, Private, без README. Затем:
+На github.com → New repository → `tg-daily-digest`, Private, без README. Затем:
 
 ```bash
 cd tg-daily-digest
-git init
-git add .
-git commit -m "init"
-git branch -M main
 git remote add origin git@github.com:<ваш-логин>/tg-daily-digest.git
 git push -u origin main
 ```
 
-### 5. Задайте секреты репозитория
+### 5. Добавить секреты
 
-Settings → Secrets and variables → Actions → New repository secret. Создайте по одному:
+Settings → Secrets and variables → Actions → New repository secret:
 
 | Secret | Значение |
 |---|---|
-| `TG_API_ID` | из шага 1 |
-| `TG_API_HASH` | из шага 1 |
-| `TG_SESSION` | из шага 3 |
-| `OPENROUTER_API_KEY` | из шага 2 |
+| `BOT_TOKEN` | токен от BotFather |
 | `TARGET_CHAT_ID` | `-1003957373164` |
+| `CHANNELS` | `username1,username2,username3,...` |
+| `OPENROUTER_API_KEY` | `sk-or-v1-...` |
 
-(опционально, во вкладке Variables — если хотите менять без пересохранения секретов: `FOLDERS`, `LOOKBACK_HOURS`, `LLM_MODEL`.)
+(опционально, в Variables: `LOOKBACK_HOURS`, `LLM_MODEL`)
 
 ### 6. Тест-прогон
 
-Actions → daily-digest → Run workflow. Должно отработать ~1–3 минуты, в группе появится дайджест.
+Actions → daily-digest → Run workflow. Через 1–2 минуты дайджест появится в группе.
 
-Дальше будет запускаться сам в 8:00 МСК ежедневно.
-
-## Локальный запуск (для отладки)
+## Локальный запуск
 
 ```bash
+cp .env.example .env
+# заполните .env
 source .venv/bin/activate
 python -m src.main
 ```
 
-## Бесплатные модели OpenRouter (на случай смены)
+## Ограничения
 
-Если `gemini-2.0-flash-exp:free` упирается в лимиты или возвращает ошибки — поменяйте `LLM_MODEL` в Variables:
-
-- `deepseek/deepseek-chat:free` — сильный reasoning, 64k контекст
-- `meta-llama/llama-3.3-70b-instruct:free` — 128k контекст
-- `qwen/qwen-2.5-72b-instruct:free` — 32k
-
-Список актуальных бесплатных моделей: https://openrouter.ai/models?max_price=0
-
-## Ограничения и нюансы
-
-- **Лимиты MTProto:** Telethon уважает FloodWait сам. Если ругается на flood — уменьшите `lookback_hours` или количество папок.
-- **Лимиты OpenRouter free:** ~50 запросов в день при $0 на счёте. Один запуск = 1 запрос, так что норм.
-- **Сессия может протухнуть:** если поменяете пароль 2FA или Telegram насильно разлогинит — повторите шаг 3 и обновите `TG_SESSION`.
-- **GitHub Actions cron нестабилен:** может опаздывать на 5–30 минут под нагрузкой. Если нужна точность — используйте внешний планировщик (cron-job.org → workflow_dispatch).
-- **Стоимость:** $0. GitHub Actions free tier для приватных репо — 2000 минут/месяц, 1 запуск ≈ 2 минуты, итого ~60 мин/месяц.
+- **Только публичные каналы** — `t.me/s/` не работает для приватных групп и каналов без @username.
+- **Не более ~200 последних постов** на канал за 24 часа (10 страниц по 20 постов). Для очень активных каналов этого достаточно.
+- **GitHub Actions cron** может опаздывать на 5–30 минут. Для точного времени используйте внешний триггер (cron-job.org → workflow_dispatch).
+- **Бесплатный OpenRouter**: ~50 запросов/день при $0 на счёте. Один запуск = 1 запрос.
 
 ## Структура
 
 ```
 tg-daily-digest/
-├── auth.py                       # одноразовая локальная авторизация
 ├── requirements.txt
 ├── .env.example
-├── .github/workflows/daily.yml   # cron-расписание
+├── .github/workflows/daily.yml   # cron 8:00 МСК
 └── src/
-    ├── config.py                 # env → dataclass
-    ├── tg_reader.py              # MTProto: чтение папок + отправка дайджеста
-    ├── link_fetcher.py           # async httpx + trafilatura
-    ├── summarizer.py             # промпт + OpenRouter call
-    └── main.py                   # пайплайн
+    ├── config.py        # env → dataclass
+    ├── tme_reader.py    # парсит t.me/s/{channel}
+    ├── link_fetcher.py  # качает текст по внешним ссылкам
+    ├── summarizer.py    # промпт + OpenRouter
+    ├── sender.py        # Bot API отправка
+    └── main.py          # пайплайн
 ```
+
+## Бесплатные альтернативные модели
+
+Если `gemini-2.0-flash-exp:free` недоступна — поменяйте `LLM_MODEL` в Variables:
+
+- `deepseek/deepseek-chat:free` — сильный reasoning, 64k контекст
+- `meta-llama/llama-3.3-70b-instruct:free` — 128k контекст
+- `qwen/qwen-2.5-72b-instruct:free` — 32k
+
+Актуальный список: https://openrouter.ai/models?max_price=0
