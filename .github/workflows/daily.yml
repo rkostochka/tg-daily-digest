@@ -23,12 +23,10 @@ jobs:
 
       - name: Run digest
         env:
-          TG_API_ID: ${{ secrets.TG_API_ID }}
-          TG_API_HASH: ${{ secrets.TG_API_HASH }}
-          TG_SESSION: ${{ secrets.TG_SESSION }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           TARGET_CHAT_ID: ${{ secrets.TARGET_CHAT_ID }}
-          FOLDERS: ${{ vars.FOLDERS || 'Fin,Interests,Data,News' }}
+          CHANNELS: ${{ secrets.CHANNELS }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           LOOKBACK_HOURS: ${{ vars.LOOKBACK_HOURS || '24' }}
           LLM_MODEL: ${{ vars.LLM_MODEL || 'qwen/qwen3-next-80b-a3b-instruct:free' }}
         run: python -m src.main
