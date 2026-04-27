@@ -140,6 +140,7 @@ async def _post_once(client: httpx.AsyncClient, api_key: str, model: str,
             {"role": "user", "content": user},
         ],
         "temperature": 0.2,
+        "usage": {"include": True},
     }
     r = await client.post(OPENROUTER_URL, headers=headers, json=payload)
     return r.status_code, r.text
@@ -171,6 +172,7 @@ async def _call_openrouter(api_key: str, primary_model: str, system: str, user: 
                         "total_tokens": usage.get("total_tokens"),
                         "prompt_tokens": usage.get("prompt_tokens"),
                         "completion_tokens": usage.get("completion_tokens"),
+                        "cost": usage.get("cost"),
                     }
                 except Exception as e:
                     last_err = f"parse error from {model}: {e}; body={body[:300]}"
@@ -215,6 +217,14 @@ async def make_digest(
             parts.append(f"Токены: {total} ({prompt_t} вход + {completion_t} ответ)")
         else:
             parts.append(f"Токены: {total}")
+    cost = result.get("cost")
+    if cost is not None:
+        if cost == 0:
+            parts.append("Стоимость: $0 (free)")
+        elif cost < 0.01:
+            parts.append(f"Стоимость: ${cost:.6f}")
+        else:
+            parts.append(f"Стоимость: ${cost:.4f}")
     parts.append(f"Сообщений: {len(messages)}")
     footer = "\n\n➖➖➖➖➖➖➖➖➖➖\n_" + " · ".join(parts) + "_"
     return digest + footer
