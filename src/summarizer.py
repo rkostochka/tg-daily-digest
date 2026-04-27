@@ -1,6 +1,7 @@
 """Суммаризация и тематическая группировка через OpenRouter (free-модель)."""
 from __future__ import annotations
 
+import json
 import logging
 
 import httpx
@@ -79,8 +80,19 @@ def _build_corpus(messages: list[TgMessage], link_texts: dict[str, str]) -> str:
     return "".join(parts)
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(min=2, max=20))
-async def _call_openrouter(api_key: str, model: str, system: str, user: str) -> str:
+# Список моделей для авто-fallback. Первая — основная, остальные — резервы при 404/429.
+FALLBACK_MODELS = [
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "openai/gpt-oss-120b:free",
+    "z-ai/glm-4.5-air:free",
+    "google/gemma-3-27b-it:free",
+    "minimax/minimax-m2.5:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
+]
+
+
+async def _post_once(client: httpx.AsyncClient, api_key: str, model: str,
+                     system: str, user: str) -> tuple[int, str]:
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -95,12 +107,36 @@ async def _call_openrouter(api_key: str, model: str, system: str, user: str) -> 
         ],
         "temperature": 0.2,
     }
+    r = await client.post(OPENROUTER_URL, headers=headers, json=payload)
+    return r.status_code, r.text
+
+
+@retry(stop=stop_after_attempt(2), wait=wait_exponential(min=2, max=10))
+async def _call_openrouter(api_key: str, primary_model: str, system: str, user: str) -> str:
+    candidates: list[str] = [primary_model]
+    for m in FALLBACK_MODELS:
+        if m != primary_model:
+            candidates.append(m)
+
     async with httpx.AsyncClient(timeout=120.0) as c:
-        r = await c.post(OPENROUTER_URL, headers=headers, json=payload)
-        if r.status_code != 200:
-            log.error("OpenRouter %s: %s", r.status_code, r.text[:500])
-            r.raise_for_status()
-        return r.json()["choices"][0]["message"]["content"]
+        last_err: str = ""
+        for model in candidates:
+            status, body = await _post_once(c, api_key, model, system, user)
+            if status == 200:
+                try:
+                    content = json.loads(body)["choices"][0]["message"]["content"]
+                    log.info("Сработала модель: %s", model)
+                    return content
+                except Exception as e:
+                    last_err = f"parse error from {model}: {e}; body={body[:300]}"
+                    log.warning(last_err)
+                    continue
+            log.warning("Модель %s вернула %s — пробуем следующую", model, status)
+            last_err = f"{model}: {status} {body[:300]}"
+            # 401 — ключ не работает, нет смысла перебирать дальше
+            if status == 401:
+                break
+        raise RuntimeError(f"Все модели не сработали. Последняя ошибка: {last_err}")
 
 
 async def make_digest(

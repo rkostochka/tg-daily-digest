@@ -32,5 +32,5 @@ class Config:
             target_chat_id=int(req("TARGET_CHAT_ID")),
             channels=channels,
             lookback_hours=int(os.environ.get("LOOKBACK_HOURS", "24")),
-            llm_model=os.environ.get("LLM_MODEL", "google/gemini-2.0-flash-exp:free"),
+            llm_model=os.environ.get("LLM_MODEL", "qwen/qwen3-next-80b-a3b-instruct:free"),
         )

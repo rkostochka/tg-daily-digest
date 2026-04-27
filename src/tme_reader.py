@@ -157,7 +157,7 @@ async def collect_messages(
     cutoff = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
     sem = asyncio.Semaphore(MAX_PARALLEL)
 
-    async with httpx.AsyncClient(headers=_HEADERS, http2=True, follow_redirects=True) as client:
+    async with httpx.AsyncClient(headers=_HEADERS, follow_redirects=True) as client:
         tasks = [_fetch_channel(client, ch, cutoff, sem) for ch in channels]
         results = await asyncio.gather(*tasks)
 

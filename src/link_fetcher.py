@@ -78,7 +78,7 @@ async def fetch_links(urls: list[str]) -> dict[str, str]:
                       "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
         "Accept-Language": "ru,en;q=0.9",
     }
-    async with httpx.AsyncClient(headers=headers, http2=True) as client:
+    async with httpx.AsyncClient(headers=headers) as client:
         results = await asyncio.gather(*[_fetch_one(client, u, sem) for u in unique])
     out = {url: text for url, text in results}
     log.info("Скачано %d/%d ссылок (с непустым текстом)", sum(1 for t in out.values() if t), len(unique))
