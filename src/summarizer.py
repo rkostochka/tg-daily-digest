@@ -146,7 +146,8 @@ async def _post_once(client: httpx.AsyncClient, api_key: str, model: str,
 
 
 @retry(stop=stop_after_attempt(2), wait=wait_exponential(min=2, max=10))
-async def _call_openrouter(api_key: str, primary_model: str, system: str, user: str) -> str:
+async def _call_openrouter(api_key: str, primary_model: str, system: str, user: str) -> dict:
+    """Возвращает {content, model, total_tokens, prompt_tokens, completion_tokens}."""
     candidates: list[str] = [primary_model]
     for m in FALLBACK_MODELS:
         if m != primary_model:
@@ -158,9 +159,19 @@ async def _call_openrouter(api_key: str, primary_model: str, system: str, user: 
             status, body = await _post_once(c, api_key, model, system, user)
             if status == 200:
                 try:
-                    content = json.loads(body)["choices"][0]["message"]["content"]
-                    log.info("Сработала модель: %s", model)
-                    return content
+                    data = json.loads(body)
+                    content = data["choices"][0]["message"]["content"]
+                    usage = data.get("usage") or {}
+                    actual_model = data.get("model") or model
+                    log.info("Сработала модель: %s, токенов: %s",
+                             actual_model, usage.get("total_tokens"))
+                    return {
+                        "content": content,
+                        "model": actual_model,
+                        "total_tokens": usage.get("total_tokens"),
+                        "prompt_tokens": usage.get("prompt_tokens"),
+                        "completion_tokens": usage.get("completion_tokens"),
+                    }
                 except Exception as e:
                     last_err = f"parse error from {model}: {e}; body={body[:300]}"
                     log.warning(last_err)
@@ -190,5 +201,20 @@ async def make_digest(
         f"---\n{corpus}\n---"
     )
     log.info("Корпус: ~%d символов, %d сообщений", len(corpus), len(messages))
-    raw = await _call_openrouter(api_key, model, SYSTEM_PROMPT, user_prompt)
-    return _normalize_for_telegram(raw)
+    result = await _call_openrouter(api_key, model, SYSTEM_PROMPT, user_prompt)
+    digest = _normalize_for_telegram(result["content"])
+
+    # Футер со справочной информацией
+    model_short = result["model"].split("/", 1)[-1].replace(":free", "")
+    total = result.get("total_tokens")
+    prompt_t = result.get("prompt_tokens")
+    completion_t = result.get("completion_tokens")
+    parts = [f"Модель: `{model_short}`"]
+    if total is not None:
+        if prompt_t is not None and completion_t is not None:
+            parts.append(f"Токены: {total} ({prompt_t} вход + {completion_t} ответ)")
+        else:
+            parts.append(f"Токены: {total}")
+    parts.append(f"Сообщений: {len(messages)}")
+    footer = "\n\n➖➖➖➖➖➖➖➖➖➖\n_" + " · ".join(parts) + "_"
+    return digest + footer
