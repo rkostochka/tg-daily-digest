@@ -32,5 +32,5 @@ class Config:
             target_chat_id=int(req("TARGET_CHAT_ID")),
             channels=channels,
             lookback_hours=int(os.environ.get("LOOKBACK_HOURS", "24")),
-            llm_model=os.environ.get("LLM_MODEL", "qwen/qwen3-next-80b-a3b-instruct:free"),
+            llm_model=os.environ.get("LLM_MODEL", "nousresearch/hermes-3-llama-3.1-405b:free"),
         )

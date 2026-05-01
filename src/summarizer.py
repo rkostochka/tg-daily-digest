@@ -114,14 +114,16 @@ def _build_corpus(messages: list[TgMessage], link_texts: dict[str, str]) -> str:
     return "".join(parts)
 
 
-# Список моделей для авто-fallback. Первая — основная, остальные — резервы при 404/429.
+# Цепочка fallback по убыванию «мощности». Берётся primary из env, остальные — резервы.
 FALLBACK_MODELS = [
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "openai/gpt-oss-120b:free",
+    "nousresearch/hermes-3-llama-3.1-405b:free",   # 405B dense — лучший reasoning
+    "inclusionai/ling-2.6-1t:free",                # 1T MoE
+    "openai/gpt-oss-120b:free",                    # 120B dense, стабильна
+    "nvidia/nemotron-3-super-120b-a12b:free",      # 120B MoE
+    "minimax/minimax-m2.5:free",                   # 196k контекст
     "z-ai/glm-4.5-air:free",
+    "meta-llama/llama-3.3-70b-instruct:free",
     "google/gemma-3-27b-it:free",
-    "minimax/minimax-m2.5:free",
-    "nvidia/nemotron-3-super-120b-a12b:free",
 ]
 
 
