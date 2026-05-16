@@ -2,26 +2,54 @@ name: daily-digest
 
 on:
   schedule:
-    # 8:00 МСК = 5:00 UTC, ежедневно
-    - cron: "0 5 * * *"
+    # 4 попытки с интервалом 30 мин, начиная с 8:00 МСК.
+    # Если runner недоступен или job отменён — следующая попытка возьмёт своё.
+    # Дедупликация по .last_run_date — если сегодня уже отправили, остальные skip.
+    - cron: "0 5 * * *"    # 08:00 МСК
+    - cron: "30 5 * * *"   # 08:30 МСК
+    - cron: "0 6 * * *"    # 09:00 МСК
+    - cron: "30 6 * * *"   # 09:30 МСК
   workflow_dispatch: {}
+
+# Запрещаем параллельные запуски — иначе два cron'а в одно время могут отправить дубль.
+concurrency:
+  group: digest-daily
+  cancel-in-progress: false
 
 jobs:
   run:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
+      - name: Already sent today?
+        id: check
+        run: |
+          TODAY=$(TZ=Europe/Moscow date +%Y-%m-%d)
+          LAST=$(cat .last_run_date 2>/dev/null || echo "")
+          echo "today=$TODAY" >> "$GITHUB_OUTPUT"
+          if [ "$LAST" = "$TODAY" ] && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Уже отправляли $TODAY — пропускаем."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/setup-python@v5
+        if: steps.check.outputs.skip == 'false'
         with:
           python-version: "3.12"
           cache: pip
 
       - name: Install deps
+        if: steps.check.outputs.skip == 'false'
         run: pip install -r requirements.txt
 
       - name: Run digest
+        if: steps.check.outputs.skip == 'false'
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           TARGET_CHAT_ID: ${{ secrets.TARGET_CHAT_ID }}
@@ -30,3 +58,16 @@ jobs:
           LOOKBACK_HOURS: ${{ vars.LOOKBACK_HOURS || '24' }}
           LLM_MODEL: ${{ vars.LLM_MODEL || 'nousresearch/hermes-3-llama-3.1-405b:free' }}
         run: python -m src.main
+
+      - name: Mark today as sent
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          echo "${{ steps.check.outputs.today }}" > .last_run_date
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .last_run_date
+          git diff --cached --quiet && exit 0
+          # rebase на свежий main на случай гонки с параллельным запуском
+          git pull --rebase --autostash origin ${{ github.ref_name }} || true
+          git commit -m "chore: mark ${{ steps.check.outputs.today }} as sent"
+          git push
