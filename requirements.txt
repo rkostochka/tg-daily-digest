@@ -5,3 +5,4 @@ cssselect==1.2.0
 trafilatura==1.12.2
 python-dotenv==1.0.1
 tenacity==9.0.0
+feedparser==6.0.11
