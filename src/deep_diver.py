@@ -68,6 +68,52 @@ def _fix_markdown(text: str) -> str:
     return text.strip()
 
 
+def _format_footer(model: str, usage: dict, key_usage: float | None) -> str:
+    model_short = model.split("/", 1)[-1].replace(":free", "")
+
+    prompt_t = usage.get("prompt_tokens") or usage.get("input_tokens")
+    completion_t = usage.get("completion_tokens") or usage.get("output_tokens")
+    total_t = usage.get("total_tokens")
+
+    parts = [f"`{model_short}`"]
+
+    if prompt_t is not None and completion_t is not None:
+        parts.append(f"Токены: {prompt_t}+{completion_t}={prompt_t+completion_t}")
+    elif total_t is not None:
+        parts.append(f"Токены: {total_t}")
+
+    cost = usage.get("cost")
+    if cost is not None:
+        if cost == 0:
+            parts.append("Стоимость: бесплатно")
+        elif cost < 0.001:
+            parts.append(f"Стоимость: ${cost:.6f}")
+        else:
+            parts.append(f"Стоимость: ${cost:.4f}")
+
+    if key_usage is not None:
+        if key_usage == 0:
+            parts.append("Баланс: $0 (free)")
+        else:
+            parts.append(f"Потрачено всего: ${key_usage:.4f}")
+
+    return "\n\n➖➖➖➖➖➖➖➖➖➖\n_" + " · ".join(parts) + "_"
+
+
+async def _fetch_key_usage(client: httpx.AsyncClient, api_key: str) -> float | None:
+    try:
+        r = await client.get(
+            "https://openrouter.ai/api/v1/auth/key",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=5.0,
+        )
+        if r.status_code == 200:
+            return r.json().get("data", {}).get("usage")
+    except Exception:
+        pass
+    return None
+
+
 async def deep_dive(
     api_key: str,
     model: str,
@@ -81,7 +127,6 @@ async def deep_dive(
         f"Найди в дайджесте соответствующую тему и дай развёрнутый анализ."
     )
 
-    # Основная модель первой, затем fallback-список без дублей
     seen: set[str] = set()
     models: list[str] = []
     for m in [model] + FALLBACK_MODELS:
@@ -105,6 +150,7 @@ async def deep_dive(
                     {"role": "user", "content": user_prompt},
                 ],
                 "temperature": 0.3,
+                "usage": {"include": True},
             }
             try:
                 r = await client.post(OPENROUTER_URL, headers=headers, json=payload)
@@ -112,15 +158,19 @@ async def deep_dive(
                 if r.status_code == 200:
                     data = r.json()
                     content = data["choices"][0]["message"]["content"]
-                    log.info("deep_dive OK: модель=%s токенов=%s",
-                             m, data.get("usage", {}).get("total_tokens"))
-                    return _fix_markdown(content)
+                    usage = data.get("usage") or {}
+                    actual_model = data.get("model") or m
+                    log.info("deep_dive OK: модель=%s токенов=%s стоимость=%s",
+                             actual_model, usage.get("total_tokens"), usage.get("cost"))
+
+                    key_usage = await _fetch_key_usage(client, api_key)
+                    footer = _format_footer(actual_model, usage, key_usage)
+                    return _fix_markdown(content) + footer
 
                 if r.status_code == 401:
                     raise RuntimeError("OpenRouter: неверный API-ключ")
 
                 if r.status_code == 429:
-                    # Уважаем Retry-After если есть, иначе ждём 3 сек перед следующей моделью
                     retry_after = int(r.headers.get("retry-after", 3))
                     wait = min(retry_after, 5)
                     log.warning("deep_dive: 429 от %s, жду %ds...", m, wait)
