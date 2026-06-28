@@ -1,0 +1,18 @@
+# Конфигурация Fly.io для интерактивного бота-слушателя.
+# Это чистый worker — HTTP не нужен, только polling к Telegram API.
+app = "tg-daily-digest-bot"
+primary_region = "ams"
+
+[build]
+
+[deploy]
+  strategy = "immediate"
+
+# Автоматический рестарт если процесс упал
+[processes]
+  app = "python -m src.bot_listener"
+
+[[vm]]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1
