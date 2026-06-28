@@ -11,18 +11,22 @@ log = logging.getLogger(__name__)
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-# Разные провайдеры — разные rate-limit квоты, поэтому чередуем их.
+# Актуальные ID из GET /api/v1/models (проверено 2026-06-28).
+# Разные провайдеры — разные rate-limit квоты.
 FALLBACK_MODELS = [
-    "deepseek/deepseek-chat-v3-0324:free",       # DeepSeek — отдельная квота
-    "qwen/qwen3-235b-a22b:free",                  # Alibaba — отдельная квота
-    "nousresearch/hermes-3-llama-3.1-405b:free",  # 405B dense
-    "openai/gpt-oss-120b:free",
-    "mistralai/mistral-7b-instruct:free",
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "z-ai/glm-4.5-air:free",
-    "minimax/minimax-m2.5:free",
-    "google/gemma-3-27b-it:free",
-    "microsoft/phi-4-reasoning-plus:free",
+    "nvidia/nemotron-3-ultra-550b-a55b:free",          # 550B, 1M ctx
+    "nvidia/nemotron-3-super-120b-a12b:free",          # 120B, 1M ctx
+    "google/gemma-4-31b-it:free",                      # Google, 262k ctx
+    "google/gemma-4-26b-a4b-it:free",                  # Google MoE, 262k ctx
+    "qwen/qwen3-next-80b-a3b-instruct:free",           # Qwen, 262k ctx
+    "qwen/qwen3-coder:free",                           # Qwen, 1M ctx
+    "nousresearch/hermes-3-llama-3.1-405b:free",       # 405B, 131k ctx
+    "openai/gpt-oss-120b:free",                        # 120B, 131k ctx
+    "openai/gpt-oss-20b:free",                         # 20B, 131k ctx
+    "meta-llama/llama-3.3-70b-instruct:free",          # Llama, 131k ctx
+    "meta-llama/llama-3.2-3b-instruct:free",           # маленькая, запасная
+    "nvidia/nemotron-3-nano-30b-a3b:free",             # 30B MoE
+    "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
 ]
 
 SYSTEM_PROMPT = """Ты — аналитик, который объясняет новости глубоко и по делу.
