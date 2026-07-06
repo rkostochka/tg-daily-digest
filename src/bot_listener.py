@@ -6,7 +6,7 @@ import os
 import sys
 
 from dotenv import load_dotenv
-from telegram import Update
+from telegram import MessageEntity, Update
 from telegram.constants import ParseMode, ChatAction
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 
@@ -32,6 +32,23 @@ def _is_trigger(text: str) -> bool:
     return True  # reply to bot message is enough signal
 
 
+def _extract_source_urls(message) -> list[str]:
+    """URL'ы из entities сообщения: text_link (скрытые под текстом) + голые url.
+
+    Дайджест отправляется с parse_mode=Markdown, поэтому «[источник](url)»
+    превращается в text_link entity, а в message.text самого url нет.
+    """
+    urls: list[str] = []
+    seen: set[str] = set()
+    ent_map = message.parse_entities([MessageEntity.TEXT_LINK, MessageEntity.URL])
+    for ent, ent_text in ent_map.items():
+        url = ent.url if ent.type == MessageEntity.TEXT_LINK else ent_text
+        if url and url not in seen:
+            seen.add(url)
+            urls.append(url)
+    return urls
+
+
 async def handle_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.message
     if not message:
@@ -46,9 +63,14 @@ async def handle_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if message.reply_to_message.from_user.id != bot_user.id:
         return
 
-    digest_text = message.reply_to_message.text or message.reply_to_message.caption or ""
+    replied = message.reply_to_message
+    digest_text = replied.text or replied.caption or ""
     if not digest_text.strip():
         return
+
+    # Ссылки-источники из дайджеста лежат в entities (text_link: «источник»),
+    # а не в самом тексте — вытаскиваем их, чтобы deep_dive подтянул статьи.
+    source_urls = _extract_source_urls(replied)
 
     user_query = (message.text or "").strip()
     # Если реплай пустой или только точка — значит хотят анализ всего сообщения
@@ -72,6 +94,7 @@ async def handle_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             model=model,
             digest_text=digest_text,
             user_query=user_query,
+            source_urls=source_urls,
         )
     except Exception as e:
         log.error("deep_dive failed: %s", e)
