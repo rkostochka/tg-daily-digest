@@ -115,7 +115,8 @@ def _fix_markdown(text: str) -> str:
     return text.strip()
 
 
-def _format_footer(model: str, usage: dict, key_usage: float | None) -> str:
+def _format_footer(model: str, usage: dict, key_usage: float | None,
+                   search_marker: str = "") -> str:
     model_short = model.split("/", 1)[-1].replace(":free", "")
 
     prompt_t = usage.get("prompt_tokens") or usage.get("input_tokens")
@@ -143,6 +144,9 @@ def _format_footer(model: str, usage: dict, key_usage: float | None) -> str:
             parts.append("Баланс: $0 (free)")
         else:
             parts.append(f"Потрачено всего: ${key_usage:.4f}")
+
+    if search_marker:
+        parts.append(search_marker)
 
     return "\n\n➖➖➖➖➖➖➖➖➖➖\n_" + " · ".join(parts) + "_"
 
@@ -198,29 +202,41 @@ def _search_enabled() -> bool:
     return os.getenv("ENABLE_WEB_SEARCH", "1").strip().lower() not in {"0", "false", "no"}
 
 
-async def _build_search_block(api_key: str, user_query: str) -> str:
-    """Живой веб-поиск фактов по вопросу + список источников с пометкой доверия."""
+async def _build_search_block(api_key: str, user_query: str) -> tuple[str, str]:
+    """Живой веб-поиск фактов по вопросу.
+
+    Возвращает (block, marker): block — контекст для LLM с источниками и пометкой
+    доверия; marker — короткая строка для футера ответа (чтобы видеть, сработал ли
+    поиск). Оба пустые, если поиск выключен.
+    """
     if not _search_enabled():
-        return ""
+        return "", ""
     model = os.getenv("SEARCH_MODEL", "perplexity/sonar")
     res = await web_research(api_key, user_query, model=model)
     if res["error"] == "no_credit":
         log.warning("Живой поиск пропущен: нет баланса OpenRouter")
-        return ""
+        return "", "🔎 поиск: пропущен (нет баланса OpenRouter)"
+    if res["error"]:
+        return "", "🔎 поиск: недоступен"
     if not res["text"]:
-        return ""
+        return "", "🔎 поиск: без результатов"
 
     lines = []
+    n_trusted = 0
     for url in res["citations"]:
-        mark = "✅ надёжный" if is_trusted(url) else "◽ прочий"
-        lines.append(f"- {url} ({mark})")
+        trusted = is_trusted(url)
+        n_trusted += trusted
+        lines.append(f"- {url} ({'✅ надёжный' if trusted else '◽ прочий'})")
     sources = ("\n\nИСТОЧНИКИ:\n" + "\n".join(lines)) if lines else ""
-    return (
+    block = (
         "\n\nРЕЗУЛЬТАТЫ ЖИВОГО ПОИСКА (Perplexity Sonar):\n---\n"
         + res["text"]
         + sources
         + "\n---"
     )
+    n = len(res["citations"])
+    marker = f"🔎 поиск: {n} источн., {n_trusted} надёжных" if n else "🔎 поиск: выполнен"
+    return block, marker
 
 
 async def deep_dive(
@@ -237,7 +253,7 @@ async def deep_dive(
     отвечать по самой статье, а не только по короткой выжимке.
     """
     # Статьи по ссылкам и живой веб-поиск тянем параллельно — не ждём одно за другим.
-    articles_block, search_block = await asyncio.gather(
+    articles_block, (search_block, search_marker) = await asyncio.gather(
         _build_articles_block(digest_text, source_urls),
         _build_search_block(api_key, user_query),
     )
@@ -291,7 +307,7 @@ async def deep_dive(
                              actual_model, usage.get("total_tokens"), usage.get("cost"))
 
                     key_usage = await _fetch_key_usage(client, api_key)
-                    footer = _format_footer(actual_model, usage, key_usage)
+                    footer = _format_footer(actual_model, usage, key_usage, search_marker)
                     return _fix_markdown(content) + footer
 
                 if r.status_code == 401:
