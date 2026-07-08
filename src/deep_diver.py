@@ -5,6 +5,7 @@ import asyncio
 import logging
 import os
 import re
+from urllib.parse import urlparse
 
 import httpx
 
@@ -177,49 +178,93 @@ def _collect_urls(digest_text: str, source_urls: list[str] | None) -> list[str]:
     return urls[:MAX_DIVE_LINKS]
 
 
-async def _build_articles_block(digest_text: str, source_urls: list[str] | None) -> str:
-    """Качает статьи по ссылкам из дайджеста и собирает их в блок для промпта."""
+async def _build_articles_block(
+    digest_text: str, source_urls: list[str] | None
+) -> tuple[str, list[str]]:
+    """Качает статьи по ссылкам из дайджеста.
+
+    Возвращает (block, read_urls): block — тексты для промпта; read_urls — ссылки,
+    которые реально удалось прочитать (для блока «Источники» в ответе).
+    """
     urls = _collect_urls(digest_text, source_urls)
     if not urls:
-        return ""
+        return "", []
     fetched = await fetch_links(urls)
     parts: list[str] = []
+    read_urls: list[str] = []
     for i, url in enumerate(urls, 1):
         text = (fetched.get(url) or "").strip()
         if text:
             parts.append(f"[{i}] {url}\n{text}")
+            read_urls.append(url)
     if not parts:
-        return ""
+        return "", []
     log.info("deep_dive: подтянуто %d/%d статей", len(parts), len(urls))
-    return (
+    block = (
         "\n\nПОЛНЫЕ ТЕКСТЫ СТАТЕЙ ПО ССЫЛКАМ ИЗ ДАЙДЖЕСТА:\n---\n"
         + "\n\n---\n".join(parts)
         + "\n---"
     )
+    return block, read_urls
+
+
+MAX_SOURCE_LINKS = 8
+
+
+def _domain_label(url: str) -> str:
+    try:
+        host = urlparse(url).netloc.lower()
+        return host[4:] if host.startswith("www.") else host
+    except Exception:
+        return url
+
+
+def _format_sources(search_urls: list[str], article_urls: list[str]) -> str:
+    """Кликабельный блок «Источники»: сначала данные из поиска, потом статьи.
+
+    Дедуп по URL, до MAX_SOURCE_LINKS ссылок, с пометкой надёжности домена.
+    """
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for u in list(search_urls) + list(article_urls):
+        if u and u not in seen:
+            seen.add(u)
+            ordered.append(u)
+    if not ordered:
+        return ""
+    lines = []
+    for u in ordered[:MAX_SOURCE_LINKS]:
+        mark = "✅" if is_trusted(u) else "◽"
+        lines.append(f"{mark} [{_domain_label(u)}]({u})")
+    extra = len(ordered) - MAX_SOURCE_LINKS
+    if extra > 0:
+        lines.append(f"…и ещё {extra}")
+    return "\n\n🔗 *Источники*\n" + "\n".join(lines)
 
 
 def _search_enabled() -> bool:
     return os.getenv("ENABLE_WEB_SEARCH", "1").strip().lower() not in {"0", "false", "no"}
 
 
-async def _build_search_block(api_key: str, user_query: str) -> tuple[str, str]:
+async def _build_search_block(api_key: str, user_query: str) -> tuple[str, str, list[str]]:
     """Живой веб-поиск фактов по вопросу.
 
-    Возвращает (block, marker): block — контекст для LLM с источниками и пометкой
-    доверия; marker — короткая строка для футера ответа (чтобы видеть, сработал ли
-    поиск). Оба пустые, если поиск выключен.
+    Возвращает (block, marker, citations): block — контекст для LLM с источниками и
+    пометкой доверия; marker — короткая строка для футера; citations — ссылки-
+    источники (для кликабельного блока «Источники» в ответе). Всё пустое, если
+    поиск выключен/недоступен.
     """
     if not _search_enabled():
-        return "", ""
+        return "", "", []
     model = os.getenv("SEARCH_MODEL", "perplexity/sonar")
     res = await web_research(api_key, user_query, model=model)
     if res["error"] == "no_credit":
         log.warning("Живой поиск пропущен: нет баланса OpenRouter")
-        return "", "🔎 поиск: пропущен (нет баланса OpenRouter)"
+        return "", "🔎 поиск: пропущен (нет баланса OpenRouter)", []
     if res["error"]:
-        return "", "🔎 поиск: недоступен"
+        return "", "🔎 поиск: недоступен", []
     if not res["text"]:
-        return "", "🔎 поиск: без результатов"
+        return "", "🔎 поиск: без результатов", []
 
     lines = []
     n_trusted = 0
@@ -236,7 +281,7 @@ async def _build_search_block(api_key: str, user_query: str) -> tuple[str, str]:
     )
     n = len(res["citations"])
     marker = f"🔎 поиск: {n} источн., {n_trusted} надёжных" if n else "🔎 поиск: выполнен"
-    return block, marker
+    return block, marker, res["citations"]
 
 
 async def deep_dive(
@@ -253,10 +298,13 @@ async def deep_dive(
     отвечать по самой статье, а не только по короткой выжимке.
     """
     # Статьи по ссылкам и живой веб-поиск тянем параллельно — не ждём одно за другим.
-    articles_block, (search_block, search_marker) = await asyncio.gather(
-        _build_articles_block(digest_text, source_urls),
-        _build_search_block(api_key, user_query),
+    (articles_block, article_urls), (search_block, search_marker, search_urls) = (
+        await asyncio.gather(
+            _build_articles_block(digest_text, source_urls),
+            _build_search_block(api_key, user_query),
+        )
     )
+    sources_section = _format_sources(search_urls, article_urls)
 
     user_prompt = (
         f"Вот дайджест:\n---\n{digest_text}\n---"
@@ -308,7 +356,7 @@ async def deep_dive(
 
                     key_usage = await _fetch_key_usage(client, api_key)
                     footer = _format_footer(actual_model, usage, key_usage, search_marker)
-                    return _fix_markdown(content) + footer
+                    return _fix_markdown(content) + sources_section + footer
 
                 if r.status_code == 401:
                     raise RuntimeError("OpenRouter: неверный API-ключ")
