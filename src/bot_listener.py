@@ -6,7 +6,7 @@ import os
 import sys
 
 from dotenv import load_dotenv
-from telegram import MessageEntity, Update
+from telegram import LinkPreviewOptions, MessageEntity, Update
 from telegram.constants import ParseMode, ChatAction
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 
@@ -104,6 +104,7 @@ async def handle_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         analysis,
         parse_mode=ParseMode.MARKDOWN,
         reply_to_message_id=message.message_id,
+        link_preview_options=LinkPreviewOptions(is_disabled=True),
     )
 
 
