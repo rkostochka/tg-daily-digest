@@ -1,0 +1,16 @@
+# Публичные Telegram-каналы для ежедневного дайджеста — по одному @username на строку.
+# Работают только публичные каналы (с @username, читаются через t.me/s/).
+# Строки, начинающиеся с #, и пустые строки игнорируются. @ можно не писать.
+# Добавить канал — допиши строку и открой PR.
+DolgosrokInvest
+LKapital
+ai_newz
+centralbank_russia
+communitysprints
+data_analysis_ml
+kontext_channel
+pro_smarent
+romarayt
+vcnews
+zamesin
+russianmacro

@@ -27,10 +27,14 @@
 
 ### 1. Список каналов
 
-Откройте каждую из папок `Fin, Interests, Data, News` в Telegram. Для каждого канала:
-- Нажмите на название → Profile → скопируйте `@username` (или ссылку `t.me/username`)
+Список каналов хранится в файле [`channels.txt`](channels.txt) — по одному `@username`
+на строку. Чтобы добавить/убрать канал, отредактируйте файл и закоммитьте (обычный PR).
+Работают только **публичные** каналы (у которых есть @username, читаются через `t.me/s/`).
 
-Запишите все username. Работают только **публичные** каналы (у которых есть @username).
+Как узнать username: в Telegram откройте канал → Profile → скопируйте `@username`.
+
+> Переменная окружения/секрет `CHANNELS` (через запятую) при желании переопределяет
+> файл — но по умолчанию она не нужна, источник правды — `channels.txt`.
 
 ### 2. Bot Token
 
@@ -60,8 +64,10 @@ Settings → Secrets and variables → Actions → New repository secret:
 |---|---|
 | `BOT_TOKEN` | токен от BotFather |
 | `TARGET_CHAT_ID` | `-1003957373164` |
-| `CHANNELS` | `username1,username2,username3,...` |
 | `OPENROUTER_API_KEY` | `sk-or-v1-...` |
+
+Список каналов задаётся в [`channels.txt`](channels.txt), а не через секрет. Секрет
+`CHANNELS` нужен, только если хотите переопределить файл, не коммитя его.
 
 (опционально, в Variables: `LOOKBACK_HOURS`, `LLM_MODEL`)
 
