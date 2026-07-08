@@ -53,7 +53,8 @@ jobs:
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           TARGET_CHAT_ID: ${{ secrets.TARGET_CHAT_ID }}
-          CHANNELS: ${{ secrets.CHANNELS }}
+          # Каналы берутся из channels.txt в репозитории (см. src/config.py).
+          # Чтобы переопределить без правки файла — задайте секрет/переменную CHANNELS.
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           LOOKBACK_HOURS: ${{ vars.LOOKBACK_HOURS || '24' }}
           LLM_MODEL: ${{ vars.LLM_MODEL || 'nousresearch/hermes-3-llama-3.1-405b:free' }}
