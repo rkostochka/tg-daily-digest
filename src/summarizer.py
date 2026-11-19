@@ -145,17 +145,34 @@ def _build_corpus(messages: list[TgMessage], link_texts: dict[str, str]) -> str:
     return "".join(parts)
 
 
-# Цепочка fallback по убыванию «мощности». Берётся primary из env, остальные — резервы.
+# Резервы на случай, если primary из env недоступна. Бесплатные модели на OpenRouter регулярно
+# выводят из каталога (в ноябре 2026 все восемь прежних дали 404 и дайджест месяц не приходил),
+# поэтому список только запасной: основной источник — живой каталог, см. _discover_free_models.
 FALLBACK_MODELS = [
-    "nousresearch/hermes-3-llama-3.1-405b:free",   # 405B dense — лучший reasoning
-    "inclusionai/ling-2.6-1t:free",                # 1T MoE
-    "openai/gpt-oss-120b:free",                    # 120B dense, стабильна
-    "nvidia/nemotron-3-super-120b-a12b:free",      # 120B MoE
-    "minimax/minimax-m2.5:free",                   # 196k контекст
-    "z-ai/glm-4.5-air:free",
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "google/gemma-3-27b-it:free",
+    "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "google/gemma-4-31b-it:free",
+    "google/gemma-4-26b-a4b-it:free",
+    "nvidia/nemotron-3.5-super-vl:free",
+    "inclusionai/ling-3.2-flash:free",
 ]
+MODELS_URL = "https://openrouter.ai/api/v1/models"
+MIN_CONTEXT = 128_000   # дайджест большой — короткоконтекстные модели не берём
+
+
+async def _discover_free_models(client: httpx.AsyncClient) -> list[str]:
+    """Бесплатные модели из живого каталога OpenRouter, самые «ёмкие» по контексту — первыми."""
+    try:
+        r = await client.get(MODELS_URL)
+        r.raise_for_status()
+        found = [
+            (m.get("context_length") or 0, m["id"]) for m in r.json().get("data", [])
+            if str(m.get("id", "")).endswith(":free") and (m.get("context_length") or 0) >= MIN_CONTEXT
+            and "text" in ((m.get("architecture") or {}).get("output_modalities") or ["text"])
+        ]
+    except Exception as e:  # каталог недоступен — обойдёмся статическим списком
+        log.warning("Не удалось получить каталог моделей: %s", e)
+        return []
+    return [mid for _, mid in sorted(found, reverse=True)]
 
 
 async def _post_once(client: httpx.AsyncClient, api_key: str, model: str,
@@ -182,14 +199,13 @@ async def _post_once(client: httpx.AsyncClient, api_key: str, model: str,
 @retry(stop=stop_after_attempt(2), wait=wait_exponential(min=2, max=10))
 async def _call_openrouter(api_key: str, primary_model: str, system: str, user: str) -> dict:
     """Возвращает {content, model, total_tokens, prompt_tokens, completion_tokens}."""
-    candidates: list[str] = [primary_model]
-    for m in FALLBACK_MODELS:
-        if m != primary_model:
-            candidates.append(m)
-
     async with httpx.AsyncClient(timeout=120.0) as c:
+        candidates: list[str] = [primary_model]
+        for m in FALLBACK_MODELS + await _discover_free_models(c):
+            if m not in candidates:
+                candidates.append(m)
         last_err: str = ""
-        for model in candidates:
+        for model in candidates[:14]:
             status, body = await _post_once(c, api_key, model, system, user)
             if status == 200:
                 try:
