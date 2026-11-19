@@ -57,7 +57,7 @@ jobs:
           # Чтобы переопределить без правки файла — задайте секрет/переменную CHANNELS.
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           LOOKBACK_HOURS: ${{ vars.LOOKBACK_HOURS || '24' }}
-          LLM_MODEL: ${{ vars.LLM_MODEL || 'nousresearch/hermes-3-llama-3.1-405b:free' }}
+          LLM_MODEL: ${{ vars.LLM_MODEL || 'nvidia/nemotron-3-ultra-550b-a55b:free' }}
           RSS_FEEDS: ${{ vars.RSS_FEEDS || '' }}
           RSS_LOOKBACK_HOURS: ${{ vars.RSS_LOOKBACK_HOURS || '48' }}
         run: python -m src.main

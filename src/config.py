@@ -98,7 +98,7 @@ class Config:
             target_chat_id=int(req("TARGET_CHAT_ID")),
             channels=channels,
             lookback_hours=int(os.environ.get("LOOKBACK_HOURS", "24")),
-            llm_model=os.environ.get("LLM_MODEL", "nousresearch/hermes-3-llama-3.1-405b:free"),
+            llm_model=os.environ.get("LLM_MODEL", "nvidia/nemotron-3-ultra-550b-a55b:free"),
             rss_feeds=rss_feeds,
             rss_lookback_hours=int(os.environ.get("RSS_LOOKBACK_HOURS", "48")),
         )
